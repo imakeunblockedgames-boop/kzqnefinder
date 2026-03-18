@@ -1,0 +1,175 @@
+-- =============================================
+-- GROK CUSTOM SAB >10M FINDER & CHECKER v1.0
+-- Made from scratch for you - finds & joins servers with any brainrot >10M
+-- All standard check script settings included
+-- =============================================
+
+local Config = {
+    MinValue = 10000000,
+    Webhook = "https://discord.com/api/webhooks/YOUR_WEBHOOK_HERE",
+    HopDelay = 15,
+    ScanDelay = 5,
+    StayIfFound = true,
+    AutoSteal = false,
+    EnableESP = true,
+    PrintDebug = true,
+    SpecificBrainrots = {}
+}
+
+local Players = game:GetService("Players")
+local TeleportService = game:GetService("TeleportService")
+local HttpService = game:GetService("HttpService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local placeId = 109983668079237
+local LP = Players.LocalPlayer
+
+-- ================== WEBHOOK SENDER ==================
+local function sendWebhook(title, desc, color)
+    if Config.Webhook == "" or Config.Webhook == "https://discord.com/api/webhooks/YOUR_WEBHOOK_HERE" then return end
+    local payload = {
+        embeds = {{
+            title = title,
+            description = desc,
+            color = color or 0x00FF00,
+            footer = { text = "Grok SAB >10M Finder • " .. os.date("%X") }
+        }}
+    }
+    pcall(function()
+        local req = (syn and syn.request) or request or http_request
+        if req then
+            req({
+                Url = Config.Webhook,
+                Method = "POST",
+                Headers = {["Content-Type"] = "application/json"},
+                Body = HttpService:JSONEncode(payload)
+            })
+        end
+    end)
+end
+
+-- ================== VALUE CHECK (flexible for patches) ==================
+local function getBrainrotValue(br)
+    if br:FindFirstChild("Value") and br.Value:IsA("NumberValue") then return br.Value.Value end
+    if br:FindFirstChild("Worth") and br.Worth:IsA("NumberValue") then return br.Worth.Value end
+    if br:FindFirstChild("Price") and br.Price:IsA("NumberValue") then return br.Price.Value end
+    if br:GetAttribute("Value") then return br:GetAttribute("Value") end
+    if br:GetAttribute("Worth") then return br:GetAttribute("Worth") end
+    if br:GetAttribute("Price") then return br:GetAttribute("Price") end
+    return 0
+end
+
+local function hasHighValueBrainrot(player)
+    if player == LP then return false end
+    
+    local folders = {
+        player:FindFirstChild("Brainrots"),
+        player:FindFirstChild("Brainrot"),
+        player.Character and player.Character:FindFirstChild("Brainrots"),
+        player.Backpack and player.Backpack:FindFirstChild("Brainrots"),
+        player:FindFirstChild("Data") and player.Data:FindFirstChild("Brainrots")
+    }
+    
+    for _, folder in ipairs(folders) do
+        if folder then
+            for _, br in ipairs(folder:GetChildren()) do
+                local val = getBrainrotValue(br)
+                local name = br.Name
+                
+                -- Check min value OR specific name list
+                if val >= Config.MinValue or Config.SpecificBrainrots[name] then
+                    return true, name, val, player, folder
+                end
+            end
+        end
+    end
+    return false
+end
+
+-- ================== ESP / HIGHLIGHT ==================
+local function createESP(player, name, value)
+    if not Config.EnableESP or not player.Character then return end
+    
+    local highlight = Instance.new("Highlight")
+    highlight.FillColor = Color3.fromRGB(0, 255, 0)
+    highlight.OutlineColor = Color3.fromRGB(0, 255, 0)
+    highlight.FillTransparency = 0.5
+    highlight.Parent = player.Character
+    
+    local billboard = Instance.new("BillboardGui")
+    billboard.Adornee = player.Character:FindFirstChild("Head") or player.Character
+    billboard.Size = UDim2.new(0, 250, 0, 60)
+    billboard.StudsOffset = Vector3.new(0, 3, 0)
+    
+    local text = Instance.new("TextLabel")
+    text.Text = name .. "\n" .. (math.floor(value / 1000000)) .. "M VALUE"
+    text.TextColor3 = Color3.fromRGB(0, 255, 0)
+    text.BackgroundTransparency = 1
+    text.TextScaled = true
+    text.Font = Enum.Font.GothamBold
+    text.Parent = billboard
+    billboard.Parent = player.Character
+end
+
+-- ================== AUTO STEAL ==================
+local function attemptSteal(player)
+    if not Config.AutoSteal then return end
+    local rs = ReplicatedStorage
+    local remote = rs:FindFirstChild("StealEvent") or rs.Remotes:FindFirstChild("Steal") or rs:FindFirstChild("BrainrotSteal")
+    if remote then
+        pcall(function() remote:FireServer(player) end)
+        print("🔥 Auto-steal fired on " .. player.Name)
+    end
+end
+
+-- ================== SERVER HOP ==================
+local function hopServer()
+    if Config.PrintDebug then print("🚀 No >10M found — hopping to new server") end
+    TeleportService:Teleport(placeId)
+end
+
+-- ================== MAIN SCAN LOOP ==================
+local function scanCurrentServer()
+    if Config.PrintDebug then print("🔍 Scanning current server for brainrots >10M...") end
+    
+    local foundAny = false
+    for _, plr in ipairs(Players:GetPlayers()) do
+        local has, name, value, owner = hasHighValueBrainrot(plr)
+        if has then
+            foundAny = true
+            local msg = owner.Name .. " has **" .. name .. "** worth **" .. math.floor(value/1000000) .. "M** in this server!"
+            
+            if Config.PrintDebug then print("✅ FOUND: " .. msg) end
+            sendWebhook("10M+ BRAINROT DETECTED!", msg, 0xFF0000)
+            createESP(owner, name, value)
+            attemptSteal(owner)
+            
+            if Config.StayIfFound then
+                print("🏆 STAYING — High value brainrot found! Steal now.")
+                return true -- stay forever
+            end
+        end
+    end
+    
+    if not foundAny then
+        wait(Config.ScanDelay)
+        hopServer()
+    else
+        wait(Config.HopDelay)
+    end
+    return false
+end
+
+-- ================== AUTO EXECUTE ==================
+if game.PlaceId == placeId then
+    print("🧠 GROK SAB >10M FINDER LOADED")
+    print("Configured for any brainrot above " .. (Config.MinValue/1000000) .. "M")
+    print("Webhook active: " .. (Config.Webhook ~= "" and "YES" or "NO"))
+    
+    while true do
+        local stayed = scanCurrentServer()
+        if not stayed then
+            wait(Config.HopDelay)
+        end
+    end
+end
